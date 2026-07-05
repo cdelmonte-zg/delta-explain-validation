@@ -44,10 +44,15 @@ HERE = Path(__file__).resolve().parent
 DEST = HERE / "taxi-nyc"
 SRC_URL = "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.parquet"
 
-# Deterministic subset: the first few pickup dates, capped per day, so the
-# table has several date partitions with a handful of files each.
+# Deterministic subset: the first few pickup dates, capped per day, each day
+# split into several files. Files within a day are laid out sorted by
+# trip_distance, so each file covers a narrow distance band and data skipping
+# on trip_distance can eliminate files *within* a partition (fare_amount and
+# PULocationID are left unsorted, so they stay wide -- the "stats exist but are
+# useless" case the explain-why example needs).
 KEEP_DATES = ["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"]
 ROWS_PER_DATE = 800
+FILES_PER_DATE = 4
 
 # The columns worth keeping: an identity, the times, the geography
 # (PULocationID zone), and the money columns that make fare/tip predicates
@@ -99,11 +104,34 @@ def main() -> None:
             seen[d] = n + 1
     table = table.take(pa.array(keep_idx))
 
-    write_deltalake(str(DEST), table, partition_by=["pickup_date"], mode="error")
+    # Lay the selected rows out sorted by trip_distance within each day, then
+    # write FILES_PER_DATE contiguous bands as separate append commits. Each
+    # band becomes one file per day, so every day ends up with several files
+    # whose trip_distance min/max ranges do not overlap -- exactly the layout
+    # that lets data skipping prune files inside a surviving partition.
+    table = table.sort_by([
+        ("pickup_date", "ascending"),
+        ("trip_distance", "ascending"),
+        ("tpep_pickup_datetime", "ascending"),
+    ])
+    day_rows: dict[str, list[int]] = {}
+    for i, d in enumerate(table["pickup_date"].to_pylist()):
+        day_rows.setdefault(d, []).append(i)
 
-    rows = table.num_rows
+    for band in range(FILES_PER_DATE):
+        idx: list[int] = []
+        for rows in day_rows.values():
+            lo = band * len(rows) // FILES_PER_DATE
+            hi = (band + 1) * len(rows) // FILES_PER_DATE
+            idx.extend(rows[lo:hi])
+        write_deltalake(str(DEST), table.take(pa.array(idx)),
+                        partition_by=["pickup_date"],
+                        mode="error" if band == 0 else "append")
+
+    files = sum(1 for f in DEST.rglob("*.parquet"))
     size = sum(f.stat().st_size for f in DEST.rglob("*") if f.is_file())
-    print(f"wrote {rows} rows across {len(KEEP_DATES)} date partitions to {DEST}")
+    print(f"wrote {table.num_rows} rows across {len(KEEP_DATES)} date partitions, "
+          f"{files} files to {DEST}")
     print(f"table size: {size / 1024:.0f} KB")
 
 

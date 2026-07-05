@@ -66,8 +66,11 @@ QUERY:  NOT (pickup_date != '2024-01-03' OR trip_distance <= 5)
        partition literals (idle here; fires e.g. on pickup_date LIKE '%01-03%')
 
   [4] survivor sets (comparative metadata scans over one snapshot)
-      baseline 5 -> partition-only 1 -> full 1
+      baseline 20 -> partition-only 4 -> full 2
 ```
+
+Both mechanisms cut: partition pruning takes 20 files to the 4 of the target day,
+then data skipping drops the two low-distance files in it, 4 to 2.
 
 The negated spelling of the query is deliberate: normalization has to visibly do
 work (push the `NOT` to the leaves) before the three interpreters ever see it.
@@ -115,9 +118,11 @@ bundled `taxi-nyc/`).
 
 `taxi-nyc/` is a small, real Delta table written by a real Delta writer
 (`deltalake`) from NYC TLC yellow-taxi trip data, January 2024 — partitioned by
-`pickup_date`, five days, with the per-file min/max statistics a production
-table carries. It is checked in (172 KB) so the validation needs no network. To
-regenerate it from source:
+`pickup_date`, five days, four files each (20 files), with the per-file min/max
+statistics a production table carries. The files within a day are laid out sorted
+by `trip_distance`, so each file covers a narrow distance band and data skipping
+can eliminate files *inside* a surviving partition. It is checked in (214 KB) so
+the validation needs no network. To regenerate it from source:
 
 ```bash
 pip install -r requirements.txt

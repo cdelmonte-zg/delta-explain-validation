@@ -100,6 +100,8 @@ def phases_of(report):
 # absent (null) in the report.
 BATTERY = [
     {
+        # Both mechanisms cut: partition pruning isolates the day (20 -> 4),
+        # then data skipping drops the two low-distance files in it (4 -> 2).
         "name": "plain-and",
         "sql": "pickup_date = '2024-01-03' AND trip_distance > 5",
         "partition_safe": "pickup_date = '2024-01-03'",
@@ -107,8 +109,8 @@ BATTERY = [
         "unsplittable": None,
         "confidence": "conservative",
         "notes": [],
-        "phases": [("Partition pruning", 5, 1), ("Data skipping", 1, 1)],
-        "final": 1,
+        "phases": [("Partition pruning", 20, 4), ("Data skipping", 4, 2)],
+        "final": 2,
     },
     {
         "name": "de-morgan",
@@ -116,8 +118,8 @@ BATTERY = [
         "partition_safe": "pickup_date = '2024-01-03'",
         "stats_safe": "trip_distance > 5",
         "confidence": "conservative",
-        "phases": [("Partition pruning", 5, 1), ("Data skipping", 1, 1)],
-        "final": 1,
+        "phases": [("Partition pruning", 20, 4), ("Data skipping", 4, 2)],
+        "final": 2,
     },
     {
         "name": "partition-only",
@@ -125,29 +127,29 @@ BATTERY = [
         "partition_safe": "pickup_date = '2024-01-03'",
         "stats_safe": None,
         "confidence": "exact",
-        "phases": [("Partition pruning", 5, 1)],
-        "final": 1,
+        "phases": [("Partition pruning", 20, 4)],
+        "final": 4,
     },
     {
         "name": "data-skipping",
-        "sql": "trip_distance > 32",
+        "sql": "trip_distance > 8",
         "partition_safe": None,
-        "stats_safe": "trip_distance > 32",
+        "stats_safe": "trip_distance > 8",
         "confidence": "conservative",
-        "phases": [("Data skipping", 5, 2)],
-        "final": 2,
+        "phases": [("Data skipping", 20, 7)],
+        "final": 7,
     },
     {
         # #72: a prefix LIKE on a string column is rewritten into a range and
         # prunes as partition-safe. All five dates match '2024-01-0%', so the
-        # partition phase keeps all 5; the stats conjunct does the pruning.
+        # partition phase keeps all 20 files; the stats conjunct does the cutting.
         "name": "prefix-like",
-        "sql": "pickup_date LIKE '2024-01-0%' AND trip_distance > 32",
+        "sql": "pickup_date LIKE '2024-01-0%' AND trip_distance > 8",
         "partition_safe": "pickup_date >= '2024-01-0' AND pickup_date < '2024-01-1'",
-        "stats_safe": "trip_distance > 32",
+        "stats_safe": "trip_distance > 8",
         "confidence": "conservative",
-        "phases": [("Partition pruning", 5, 5), ("Data skipping", 5, 2)],
-        "final": 2,
+        "phases": [("Partition pruning", 20, 20), ("Data skipping", 20, 7)],
+        "final": 7,
     },
     {
         # #75: a substring LIKE over a partition column is evaluated directly
@@ -158,30 +160,30 @@ BATTERY = [
         "partition_exact": "pickup_date LIKE '%01-03%'",
         "stats_safe": "trip_distance > 5",
         "confidence": "conservative",
-        "phases": [("Partition pruning", 5, 1), ("Data skipping", 1, 1)],
-        "final": 1,
+        "phases": [("Partition pruning", 20, 4), ("Data skipping", 4, 2)],
+        "final": 2,
     },
     {
         # A function over a column stays unsupported: it degrades, and the
         # supported conjunct still prunes.
         "name": "degraded-function",
-        "sql": "UPPER(pickup_date) = '2024-01-03' AND trip_distance > 32",
+        "sql": "UPPER(pickup_date) = '2024-01-03' AND trip_distance > 8",
         "partition_safe": None,
-        "stats_safe": "trip_distance > 32",
+        "stats_safe": "trip_distance > 8",
         "unsplittable": "UPPER(pickup_date) = '2024-01-03'",
         "confidence": "incomplete",
         "notes": ["UNSUPPORTED_EXPRESSION"],
-        "phases": [("Data skipping", 5, 2)],
-        "final": 2,
+        "phases": [("Data skipping", 20, 7)],
+        "final": 7,
     },
     {
         "name": "mixed-or",
-        "sql": "pickup_date = '2024-01-03' OR trip_distance > 32",
-        "unsplittable": "pickup_date = '2024-01-03' OR trip_distance > 32",
+        "sql": "pickup_date = '2024-01-03' OR trip_distance > 30",
+        "unsplittable": "pickup_date = '2024-01-03' OR trip_distance > 30",
         "confidence": "incomplete",
         "notes": ["UNSPLITTABLE_OR"],
-        "phases": [("Data skipping", 5, 2)],
-        "final": 2,
+        "phases": [("Data skipping", 20, 6)],
+        "final": 6,
     },
     {
         "name": "column-to-column",
@@ -189,8 +191,8 @@ BATTERY = [
         "unsplittable": "tip_amount > fare_amount",
         "confidence": "incomplete",
         "notes": ["UNSUPPORTED_EXPRESSION"],
-        "phases": [("Data skipping", 5, 5)],
-        "final": 5,
+        "phases": [("Data skipping", 20, 20)],
+        "final": 20,
     },
     {
         # OR factoring releases the common conjunct to partition pruning.
@@ -200,8 +202,8 @@ BATTERY = [
         "partition_safe": "pickup_date = '2024-01-03'",
         "stats_safe": "trip_distance > 5 OR fare_amount > 50",
         "confidence": "conservative",
-        "phases": [("Partition pruning", 5, 1), ("Data skipping", 1, 1)],
-        "final": 1,
+        "phases": [("Partition pruning", 20, 4), ("Data skipping", 4, 4)],
+        "final": 4,
     },
 ]
 
@@ -246,7 +248,7 @@ def section_b():
           kept_set(RESULTS["de-morgan"]) == base,
           f"{sorted(kept_set(RESULTS['de-morgan']))} vs {sorted(base)}")
 
-    dn = kept_set(report_for("NOT (NOT (trip_distance > 32))"))
+    dn = kept_set(report_for("NOT (NOT (trip_distance > 8))"))
     plain_ds = kept_set(RESULTS["data-skipping"])
     check("B", "double-negation", "identical kept set to plain form",
           dn == plain_ds, f"{sorted(dn)} vs {sorted(plain_ds)}")
@@ -259,7 +261,7 @@ def section_b():
 
     # #72: prefix LIKE equals the lexicographic range it rewrites to.
     rng = kept_set(report_for(
-        "pickup_date >= '2024-01-0' AND pickup_date < '2024-01-1' AND trip_distance > 32"))
+        "pickup_date >= '2024-01-0' AND pickup_date < '2024-01-1' AND trip_distance > 8"))
     check("B", "prefix-like", "identical kept set to lexicographic range",
           kept_set(RESULTS["prefix-like"]) == rng,
           f"{sorted(kept_set(RESULTS['prefix-like']))} vs {sorted(rng)}")
@@ -272,13 +274,13 @@ def section_b():
           f"{sorted(kept_set(RESULTS['contains-like']))} vs {sorted(eq)}")
 
     # A degraded predicate keeps exactly what its supported remainder keeps.
-    stripped = kept_set(RESULTS["data-skipping"])  # remainder is trip_distance > 32
+    stripped = kept_set(RESULTS["data-skipping"])  # remainder is trip_distance > 8
     check("B", "degraded-function", "same kept set as its stripped remainder",
           kept_set(RESULTS["degraded-function"]) == stripped,
           f"{sorted(kept_set(RESULTS['degraded-function']))} vs {sorted(stripped)}")
 
     check("B", "column-to-column", "unsupported predicate keeps all files",
-          len(kept_set(RESULTS["column-to-column"])) == 5)
+          len(kept_set(RESULTS["column-to-column"])) == 20)
 
 
 # ── Section C: differential oracle ──────────────────────────────────────────
@@ -346,12 +348,12 @@ ORACLE_CASES = [
     ("plain-and", ("and", [("eq", "pickup_date", "2024-01-03"), ("gt", "trip_distance", 5)])),
     ("de-morgan", ("and", [("eq", "pickup_date", "2024-01-03"), ("gt", "trip_distance", 5)])),
     ("partition-only", ("eq", "pickup_date", "2024-01-03")),
-    ("data-skipping", ("gt", "trip_distance", 32)),
+    ("data-skipping", ("gt", "trip_distance", 8)),
     ("prefix-like", ("and", [("ge", "pickup_date", "2024-01-0"),
                              ("lt", "pickup_date", "2024-01-1"),
-                             ("gt", "trip_distance", 32)])),
-    ("degraded-function", ("gt", "trip_distance", 32)),
-    ("mixed-or", ("or", [("eq", "pickup_date", "2024-01-03"), ("gt", "trip_distance", 32)])),
+                             ("gt", "trip_distance", 8)])),
+    ("degraded-function", ("gt", "trip_distance", 8)),
+    ("mixed-or", ("or", [("eq", "pickup_date", "2024-01-03"), ("gt", "trip_distance", 30)])),
     ("or-factoring", ("and", [("eq", "pickup_date", "2024-01-03"),
                               ("or", [("gt", "trip_distance", 5), ("gt", "fare_amount", 50)])])),
 ]
@@ -360,7 +362,7 @@ ORACLE_CASES = [
 def section_c():
     files = replay_log(TABLE)
     check("C", "replay", "log replay sees the whole snapshot",
-          len(files) == 5, f"{len(files)} files")
+          len(files) == 20, f"{len(files)} files")
     for name, tree in ORACLE_CASES:
         oracle = {p for p, f in files.items() if may_match(f, tree)}
         tool = kept_set(RESULTS[name])
@@ -411,7 +413,7 @@ TRACER_EXPECT = {
     "partition_safe": "pickup_date = '2024-01-03'",
     "stats_safe": "trip_distance > 5",
     "stripped": "pickup_date = '2024-01-03' AND trip_distance > 5",
-    "survivors": {"baseline": 5, "partition": 1, "full": 1},
+    "survivors": {"baseline": 20, "partition": 4, "full": 2},
 }
 
 

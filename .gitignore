@@ -1,0 +1,9 @@
+# Source parquet cached by create_taxi_table.py (do not commit the raw TLC file)
+.taxi-src.parquet
+*.parquet.tmp
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

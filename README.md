@@ -1,5 +1,7 @@
 # delta-explain-validation
 
+[![Validation](https://github.com/cdelmonte-zg/delta-explain-validation/actions/workflows/validation.yml/badge.svg)](https://github.com/cdelmonte-zg/delta-explain-validation/actions/workflows/validation.yml)
+
 An independent, black-box validation of [delta-explain](https://github.com/cdelmonte-zg/delta-explain)
 against a **real NYC-taxi Delta table** — and a window into the IR pipeline at
 its core.
@@ -14,11 +16,12 @@ does two things:
    small compiler: SQL is parsed once into an owned AST, and that single AST is
    then read by three independent interpreters. `validate.py --layers` prints a
    real query descending through those intermediate representations.
-2. **Checks that every claim holds against real data.** 82 assertions over a
-   real Delta table — classification, survivor counts, metamorphic invariants,
-   and an independent log-replay oracle — all through delta-explain's *public*
-   contract (its CLI and versioned JSON), so a green run certifies the release
-   you can `pip install`.
+2. **Checks that every claim holds against real data.** A full suite of
+   assertions over a real Delta table — classification, survivor counts,
+   metamorphic invariants, and an independent log-replay oracle — all through
+   delta-explain's *public* contract (its CLI and versioned JSON), so a green
+   run certifies the release you can `pip install`. The badge above runs exactly
+   that on every push; the run prints the live pass count.
 
 ## The theme: one parse, three interpreters
 
@@ -89,7 +92,7 @@ needs a `--features debug-ir` build (it is skipped, with a note, otherwise).
 
 ```bash
 pip install delta-explain          # or: cargo install delta-explain
-python validate.py                 # 75 checks (A-D); section E skipped
+python validate.py                 # sections A-D; section E skipped without a debug-ir build
 ```
 
 To include the IR-layer verification and the `--layers` walk, build delta-explain
@@ -100,7 +103,7 @@ with the internal diagnostic feature and point the script at it:
 cargo build --features debug-ir
 
 # here:
-DX_DEBUG_BIN=/path/to/delta-explain/target/debug/delta-explain python validate.py           # 82 checks
+DX_DEBUG_BIN=/path/to/delta-explain/target/debug/delta-explain python validate.py           # all sections, incl. E
 DX_DEBUG_BIN=/path/to/delta-explain/target/debug/delta-explain python validate.py --layers  # the walk
 ```
 

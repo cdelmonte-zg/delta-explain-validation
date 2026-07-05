@@ -1,29 +1,33 @@
 #!/usr/bin/env python3
 """Write `taxi-nyc`: a small, real Delta table from NYC TLC yellow-taxi data.
 
-Unlike the synthetic fixtures, this one is written by a real Delta writer
+Unlike a synthetic blob, this table is written by a real Delta writer
 (deltalake) from a public production dataset, so its log carries the
-partition layout and per-file statistics a real table has - the kind of
-shape LogBuilder cannot synthesize. It is the recognizable table behind
-the quickstart and the `taxi` integration tests.
+partition layout and per-file statistics a real table has. It is the table
+`validate.py` runs against, checked into this repo so the validation needs
+no network.
 
 Data source and attribution: NYC Taxi & Limousine Commission (TLC) trip
 record data, January 2024 yellow taxi
 (https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page). The TLC
 publishes these files for public use under its data usage terms linked
-on that page; this fixture redistributes a small derived subset for
-testing. We keep a deterministic subset (the first N trips of the first
-few days), a tidy column set, and partition by pickup date so the table
-stays a few hundred KB - delta-explain never reads the parquet data, but
-the fixture is checked in, so the data files must be small.
+on that page; this repo redistributes a small derived subset for testing.
+We keep a deterministic subset (the first N trips of the first few days),
+a tidy column set, and partition by pickup date so the table stays a few
+hundred KB.
+
+Note on reproducibility: the row selection is deterministic, but the
+on-disk table is not byte-identical across runs - deltalake assigns random
+parquet file names and write timestamps each time.
 
 Regenerate (from the repo root, with the deltalake writer available):
 
-    python fixtures/create_taxi_table.py           # downloads the source
+    pip install -r requirements.txt
+    python create_taxi_table.py                    # downloads the source
     TAXI_SRC=/path/to/yellow_tripdata_2024-01.parquet \
-        python fixtures/create_taxi_table.py       # or point at a local copy
+        python create_taxi_table.py                # or point at a local copy
 
-The script refuses to overwrite an existing fixtures/taxi-nyc.
+The script refuses to overwrite an existing taxi-nyc/.
 """
 
 import os

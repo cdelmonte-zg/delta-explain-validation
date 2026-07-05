@@ -1,0 +1,51 @@
+name: Validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  # The point of this repo: validate the installable release through its public
+  # contract only. No source, no internal flags. This is the badge.
+  release:
+    name: Validate the installable release (black-box)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install delta-explain from PyPI
+        run: pip install delta-explain
+      - name: Validate (sections A-D)
+        run: python validate.py
+
+  # Optional: rebuild delta-explain from source with the internal debug-ir
+  # feature and run section E too, verifying that the IR layer walk the
+  # companion article quotes still holds. Not on every push -- the release job
+  # above is what must stay green.
+  ir-layers:
+    name: Verify the IR layer walk (source build)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Check out delta-explain source
+        uses: actions/checkout@v7
+        with:
+          repository: cdelmonte-zg/delta-explain
+          path: delta-explain-src
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build with the debug-ir feature
+        run: cargo build --features debug-ir --manifest-path delta-explain-src/Cargo.toml
+      - name: Validate (all sections, incl. E)
+        env:
+          DX_BIN: ${{ github.workspace }}/delta-explain-src/target/debug/delta-explain
+          DX_DEBUG_BIN: ${{ github.workspace }}/delta-explain-src/target/debug/delta-explain
+        run: python validate.py

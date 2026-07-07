@@ -466,7 +466,7 @@ def parse_dump(dump):
         survivors[key] = int(m.group(1)) if m else None
 
     return {
-        "parsed": rendered("owned AST (parsed)"),
+        "parsed": rendered("owned AST (before normalization)"),
         "normalized": rendered("owned AST (normalized)"),
         "partition_safe": bucket("partition_safe"),
         "partition_exact": bucket("partition_exact"),

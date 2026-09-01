@@ -35,7 +35,7 @@ single source of truth — one owned AST — and three interpreters over it:
                                                       |
                         +-----------------------------+-----------------------------+
                         |                             |                             |
-                   analyzer                     kernel bridge              partition-literal
+                   analyzer                     kernel lowering            partition-literal
                 (classification)              (delta_kernel IR)           evaluator (exact)
                 what the user reads          what the kernel runs        what the literals decide
 ```
@@ -58,7 +58,7 @@ QUERY:  NOT (pickup_date != '2024-01-03' OR trip_distance <= 5)
        stats-safe     : trip_distance > 5
        confidence     : conservative
 
-  [3b] kernel bridge -> delta_kernel Predicate IR (what the kernel evaluates)
+  [3b] kernel lowering -> delta_kernel Predicate IR (what the kernel evaluates)
        lowered ops    : And Equal GreaterThan
        scan predicate : pickup_date = '2024-01-03' AND trip_distance > 5
 

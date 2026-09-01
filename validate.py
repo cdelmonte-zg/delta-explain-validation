@@ -397,7 +397,8 @@ def section_d():
 # The heart of the tool is a compiler-style shape: sqlparser is used once, its
 # output is converted into delta-explain's own owned AST, and that single AST is
 # then read by three independent interpreters -- the analyzer (which classifies
-# fragments), the kernel bridge (which lowers to delta_kernel's Predicate IR),
+# fragments), the kernel lowering (which maps already-classified fragments to
+# delta_kernel's Predicate IR),
 # and the partition-literal evaluator (which decides partition-exact fragments
 # against the concrete literals). Because all three read the same AST, "what the
 # user reads", "what the kernel evaluates", and "what the literals decide" can
@@ -446,10 +447,31 @@ def parse_dump(dump):
         m = re.search(r"^rendered: (.+)$", sections.get(section, ""), re.M)
         return m.group(1) if m else None
 
+    # The classification section dumps the structured PredicateClassification
+    # (one list of owned-AST fragments per bucket) rather than pre-rendered
+    # strings. Reconstruct the SQL-shaped text for the comparison fragments
+    # the tracer exercises; an empty bucket renders inline as `name: [],` and
+    # yields None, like the old format's absent Some(...).
+    OP_SQL = {"Eq": "=", "Ne": "<>", "Lt": "<", "Le": "<=", "Gt": ">", "Ge": ">="}
+
     def bucket(name):
         cls = sections.get("classification", "")
-        m = re.search(rf"{name}: Some\(\s*\"(.*?)\",?\s*\)", cls, re.S)
-        return m.group(1) if m else None
+        m = re.search(rf"^    {name}: \[$(.*?)^    \],?$", cls, re.S | re.M)
+        if not m:
+            return None
+        frags = []
+        for cm in re.finditer(
+                r"col: ColRef\(\s*\[\s*\"([^\"]+)\",?\s*\],?\s*\),?"
+                r"\s*op: (\w+),\s*lit: (\w+)\(\s*\"(.*?)\",?\s*\)",
+                m.group(1), re.S):
+            col, op, kind, raw = cm.groups()
+            lit = raw if kind == "Number" else f"'{raw}'"
+            frags.append(f"{col} {OP_SQL.get(op, op)} {lit}")
+        if frags:
+            return " AND ".join(frags)
+        # Non-comparison fragments: surface the squashed raw block so a
+        # failing check still shows what the bucket held.
+        return " ".join(m.group(1).split())
 
     full = sections.get("kernel predicate: full scan", "")
     m = re.search(r"^scan predicate after stripping unsupported fragments: (.+)$",
@@ -460,7 +482,7 @@ def parse_dump(dump):
     survivors = {}
     body = sections.get("survivor sets", "")
     for key, pat in [("baseline", r"^baseline: (\d+) files"),
-                     ("partition", r"^partition-only scan: (\d+) files"),
+                     ("partition", r"^partition pruning: (\d+) files"),
                      ("full", r"^full scan: (\d+) files")]:
         m = re.search(pat, body, re.M)
         survivors[key] = int(m.group(1)) if m else None
@@ -488,7 +510,7 @@ def section_e():
         check("E", "tracer", f"IR layer: {key}",
               d[key] == TRACER_EXPECT[key],
               f"{d[key]!r} vs expected {TRACER_EXPECT[key]!r}")
-    check("E", "tracer", "kernel bridge lowered And(Equal, GreaterThan)",
+    check("E", "tracer", "kernel lowering produced And(Equal, GreaterThan)",
           d["kernel_ops"] == ["And", "Equal", "GreaterThan"],
           f"{d['kernel_ops']}")
     check("E", "tracer", "survivor sets across the three scans",
@@ -514,7 +536,7 @@ def show_layers():
     print(f"       partition-safe : {d['partition_safe']}")
     print(f"       stats-safe     : {d['stats_safe']}")
     print(f"       confidence     : {ds['analysis']['confidence']}\n")
-    print("  [3b] kernel bridge -> delta_kernel Predicate IR (what the kernel evaluates)")
+    print("  [3b] kernel lowering -> delta_kernel Predicate IR (what the kernel evaluates)")
     print(f"       lowered ops    : {' '.join(d['kernel_ops'])}")
     print(f"       scan predicate : {d['stripped']}\n")
     print("  [3c] partition eval-> decides partition-exact fragments against the")

@@ -18,8 +18,10 @@ Four sections:
   A. Per-case expectations. A battery of predicates, each with declared
      expectations read straight from the JSON report: classification buckets
      (partition-safe / partition-exact / stats-safe / unsplittable), the
-     confidence label, diagnostic note codes, and the per-phase survivor
-     counts (input/output files of each pruning phase).
+     confidence label, diagnostic note codes, the per-phase survivor
+     counts (input/output files of each pruning phase), and the per-column
+     stats coverage (which files entering data skipping carry the statistics
+     each stats-safe column needs, and under which requirement).
   B. Metamorphic invariants. Predicates that are logically equivalent must
      produce identical kept sets: a negated form and its plain form; a prefix
      LIKE and the lexicographic range it rewrites to; a substring LIKE over a
@@ -32,8 +34,9 @@ Four sections:
      and must reproduce the tool's kept set file by file. This is the soundness
      check: the tool must never drop a file the oracle keeps.
   D. Contract surface. `--explain-why` names the expected reason codes for a
-     query that cannot prune; the error contract holds (unknown column and
-     malformed SQL exit 1 with empty stdout, a usage error exits 2).
+     query that cannot prune; a path-addressed table reports no catalog; the
+     error contract holds (unknown column and malformed SQL exit 1 with empty
+     stdout, a usage error exits 2).
 
 Usage:
     pip install delta-explain           # or: cargo install delta-explain
@@ -93,11 +96,23 @@ def phases_of(report):
             for p in report.get("phases", [])]
 
 
+def coverage_of(report):
+    rows = report["analysis"].get("stats_coverage")
+    if rows is None:
+        return None
+    return [(c["column"], c["requirement"], c["candidate_files"], c["covered_files"])
+            for c in rows]
+
+
 # ── Section A: per-case expectations ────────────────────────────────────────
 
 # Expectation keys are all optional; only declared ones are checked. Buckets
 # use the JSON's snake_case analysis fields; a bucket declared None must be
-# absent (null) in the report.
+# absent (null) in the report. `coverage` lists (column, requirement,
+# candidate_files, covered_files) rows, in the report's own order; every file of
+# the taxi table carries full stats, so covered == candidate throughout, and
+# what the rows certify is the candidate population (the partition survivors,
+# not the whole snapshot) and the requirement family each column test asks for.
 BATTERY = [
     {
         # Both mechanisms cut: partition pruning isolates the day (20 -> 4),
@@ -111,6 +126,7 @@ BATTERY = [
         "notes": [],
         "phases": [("Partition pruning", 20, 4), ("Data skipping", 4, 2)],
         "final": 2,
+        "coverage": [("trip_distance", "min_max", 4, 4)],
     },
     {
         "name": "de-morgan",
@@ -129,6 +145,7 @@ BATTERY = [
         "confidence": "exact",
         "phases": [("Partition pruning", 20, 4)],
         "final": 4,
+        "coverage": [],
     },
     {
         "name": "data-skipping",
@@ -138,6 +155,33 @@ BATTERY = [
         "confidence": "conservative",
         "phases": [("Data skipping", 20, 7)],
         "final": 7,
+        "coverage": [("trip_distance", "min_max", 20, 20)],
+    },
+    {
+        # A null test needs null counts, not min/max: the coverage row says so.
+        # No file in the table has a null distance, so data skipping empties
+        # the snapshot.
+        "name": "null-test",
+        "sql": "trip_distance IS NULL",
+        "partition_safe": None,
+        "stats_safe": "trip_distance IS NULL",
+        "confidence": "conservative",
+        "phases": [("Data skipping", 20, 0)],
+        "final": 0,
+        "coverage": [("trip_distance", "null_count", 20, 20)],
+    },
+    {
+        # IS NOT DISTINCT FROM combines both stats families, one coverage row
+        # per requirement. Every file has tips in [0, max], so none drops.
+        "name": "distinct-from",
+        "sql": "tip_amount IS NOT DISTINCT FROM 0",
+        "partition_safe": None,
+        "stats_safe": "tip_amount IS NOT DISTINCT FROM 0",
+        "confidence": "conservative",
+        "phases": [("Data skipping", 20, 20)],
+        "final": 20,
+        "coverage": [("tip_amount", "min_max", 20, 20),
+                     ("tip_amount", "null_count_and_num_records", 20, 20)],
     },
     {
         # #72: a prefix LIKE on a string column is rewritten into a range and
@@ -175,6 +219,7 @@ BATTERY = [
         "notes": ["UNSUPPORTED_EXPRESSION"],
         "phases": [("Data skipping", 20, 7)],
         "final": 7,
+        "coverage": [("trip_distance", "min_max", 20, 20)],
     },
     {
         "name": "mixed-or",
@@ -193,6 +238,7 @@ BATTERY = [
         "notes": ["UNSUPPORTED_EXPRESSION"],
         "phases": [("Data skipping", 20, 20)],
         "final": 20,
+        "coverage": [],
     },
     {
         # OR factoring releases the common conjunct to partition pruning.
@@ -204,6 +250,7 @@ BATTERY = [
         "confidence": "conservative",
         "phases": [("Partition pruning", 20, 4), ("Data skipping", 4, 4)],
         "final": 4,
+        "coverage": [("fare_amount", "min_max", 4, 4), ("trip_distance", "min_max", 4, 4)],
     },
 ]
 
@@ -238,6 +285,18 @@ def section_a():
             check("A", name, "final file count",
                   rep["final_files"] == case["final"],
                   f"{rep['final_files']} vs expected {case['final']}")
+        if "coverage" in case:
+            rows = coverage_of(rep)
+            check("A", name, "stats coverage rows", rows == case["coverage"],
+                  f"{rows} vs expected {case['coverage']}")
+        # Coverage is measured over the files that enter data skipping, so
+        # every row's candidate population must equal that phase's input.
+        skipping_in = [i for p, i, _ in phases_of(rep) if p == "Data skipping"]
+        if skipping_in and analysis.get("stats_coverage"):
+            check("A", name, "coverage candidates == data-skipping input",
+                  all(c["candidate_files"] == skipping_in[0]
+                      for c in analysis["stats_coverage"]),
+                  f"{coverage_of(rep)} vs phase input {skipping_in[0]}")
 
 
 # ── Section B: metamorphic invariants ───────────────────────────────────────
@@ -379,6 +438,11 @@ def section_d():
     codes = {d["code"] for d in rep.get("explain", [])}
     check("D", "explain-why", "names NO_PARTITION_FILTER and WEAK_DATA_SKIPPING",
           {"NO_PARTITION_FILTER", "WEAK_DATA_SKIPPING"} <= codes, f"{sorted(codes)}")
+
+    # A path-addressed table is not a catalog table: the catalog block is null.
+    rep = report_for("trip_distance > 8")
+    check("D", "path-table", "catalog is null", rep.get("catalog") is None,
+          f"{rep.get('catalog')!r}")
 
     code, out, err = run("-w", "no_such_column = 1")
     check("D", "unknown-column", "exit 1, empty stdout",

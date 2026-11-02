@@ -81,10 +81,10 @@ work (push the `NOT` to the leaves) before the three interpreters ever see it.
 
 | Section | What it certifies | Needs |
 |---|---|---|
-| **A. Per-case expectations** | For a battery of predicates, the classification buckets, confidence label, diagnostic note codes, and per-phase survivor counts match. | public JSON |
+| **A. Per-case expectations** | For a battery of predicates, the classification buckets, confidence label, diagnostic note codes, per-phase survivor counts, and per-column stats coverage (candidate population and requirement family) match. | public JSON |
 | **B. Metamorphic invariants** | Logically equivalent predicates keep the identical file set: negated vs plain, prefix `LIKE` vs its lexicographic range, substring `LIKE` over a partition column vs the equality it decides, factored `OR` vs its expansion; a degraded predicate keeps exactly what its supported remainder keeps. | public JSON |
 | **C. Differential oracle** | An independent replay of the Delta log in plain Python evaluates each predicate conservatively and reproduces the tool's kept set file by file. This is the **soundness** check: the tool must never drop a file the oracle keeps. | public JSON |
-| **D. Contract surface** | `--explain-why` names the expected reason codes for a query that cannot prune; the error contract holds (exit codes, empty stdout on failure). | public JSON |
+| **D. Contract surface** | `--explain-why` names the expected reason codes for a query that cannot prune; a path-addressed table reports no catalog; the error contract holds (exit codes, empty stdout on failure). | public JSON |
 | **E. IR & interpretation** | The layer-by-layer dumps the [companion article](#related) quotes are real and current: parse, normalization, classification, kernel lowering, and survivor sets all match. | debug-ir build |
 
 Sections A–D go through the shipped binary's public contract only, so they run

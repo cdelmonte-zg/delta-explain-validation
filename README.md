@@ -85,7 +85,7 @@ work (push the `NOT` to the leaves) before the three interpreters ever see it.
 | **B. Metamorphic invariants** | Logically equivalent predicates keep the identical file set: negated vs plain, prefix `LIKE` vs its lexicographic range, substring `LIKE` over a partition column vs the equality it decides, factored `OR` vs its expansion; a degraded predicate keeps exactly what its supported remainder keeps. | public JSON |
 | **C. Differential oracle** | An independent replay of the Delta log in plain Python evaluates each predicate conservatively and reproduces the tool's kept set file by file. This is the **soundness** check: the tool must never drop a file the oracle keeps. | public JSON |
 | **D. Contract surface** | `--explain-why` names the expected reason codes for a query that cannot prune; a path-addressed table reports no catalog; the error contract holds (exit codes, empty stdout on failure). | public JSON |
-| **E. IR & interpretation** | The layer-by-layer dumps the [companion article](#related) quotes are real and current: parse, normalization, classification, kernel lowering, and survivor sets all match. | debug-ir build |
+| **E. IR & interpretation** | The layer-by-layer dumps the [companion essay](#related) quotes are real and current: parse, normalization, classification, kernel lowering, and survivor sets all match. | debug-ir build |
 
 Sections A–D go through the shipped binary's public contract only, so they run
 against whatever you `pip install`. Section E verifies the internal IR dumps and
@@ -136,6 +136,6 @@ usage terms.
 ## Related
 
 - [delta-explain](https://github.com/cdelmonte-zg/delta-explain) — the tool under test.
-- *How delta-explain Measures Pruning* — the companion deep dive on the IR
-  pipeline and the three interpreters; the dumps it quotes are the ones section E
-  regenerates.
+- [A Small Compiler for Explaining Delta Lake Pruning](https://cdelmonte.dev/essays/a-small-compiler-for-explaining-delta-lake-pruning/) — the
+  companion essay on the IR pipeline and the three interpreters; the dumps it
+  quotes are the ones section E regenerates.
